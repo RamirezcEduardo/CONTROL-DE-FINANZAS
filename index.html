@@ -176,6 +176,15 @@ img{max-width:100%}
 .login .btn.primary{width:100%;border-radius:10px}
 .login .ok{color:var(--ingreso)} .login .bad{color:var(--gasto)}
 body.out header .sub{display:none}
+.pin{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+.pin input{width:100%;min-width:0;aspect-ratio:1/1.15;text-align:center;font-size:24px;font-weight:600;padding:0;border-radius:10px;-webkit-text-security:disc}
+.pin input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
+.pin.shake{animation:shake .35s}
+@keyframes shake{20%,60%{transform:translateX(-6px)}40%,80%{transform:translateX(6px)}}
+@media (prefers-reduced-motion:reduce){.pin.shake{animation:none}}
+.remember{display:flex;align-items:center;gap:8px;font-weight:400!important;color:var(--muted);font-size:14px}
+.remember input{width:16px;height:16px;padding:0;accent-color:var(--accent)}
+
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 </head>
@@ -201,13 +210,15 @@ body.out header .sub{display:none}
 
 
   <div class="login-wrap" id="loginWrap" hidden>
-  <form class="login" id="login">
-    <div class="brand"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="3" stroke="currentColor" stroke-width="2"/><path d="M2 10h20" stroke="currentColor" stroke-width="2"/><path d="M6 15h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Acceso privado</div>
-    <h2>Entra a tu tablero</h2>
-    <p>Te enviaremos un enlace a tu correo. Ábrelo en este mismo dispositivo y entrarás directo. Solo lo haces una vez por dispositivo.</p>
-    <label for="email">Correo</label>
-    <input id="email" type="email" autocomplete="email" inputmode="email" required value="ramirezcacereseduardo18@gmail.com">
-    <button class="btn primary" id="sendLink" type="submit">Enviarme el enlace</button>
+  <form class="login" id="login" autocomplete="off">
+    <div class="brand"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="4" y="10" width="16" height="11" rx="2.5" stroke="currentColor" stroke-width="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Acceso privado</div>
+    <h2>Ingresa tu código</h2>
+    <p>Escribe tu código de 6 dígitos para ver tu tablero.</p>
+    <div class="pin" id="pin" role="group" aria-label="Código de acceso">
+      <input inputmode="numeric" maxlength="1" aria-label="Dígito 1" autocomplete="one-time-code"><input inputmode="numeric" maxlength="1" aria-label="Dígito 2"><input inputmode="numeric" maxlength="1" aria-label="Dígito 3"><input inputmode="numeric" maxlength="1" aria-label="Dígito 4"><input inputmode="numeric" maxlength="1" aria-label="Dígito 5"><input inputmode="numeric" maxlength="1" aria-label="Dígito 6">
+    </div>
+    <label class="remember"><input type="checkbox" id="remember" checked> Recordar en este dispositivo</label>
+    <button class="btn primary" id="enter" type="submit">Entrar</button>
     <p class="fnote" id="loginMsg" role="status"></p>
   </form>
   </div>
@@ -571,7 +582,9 @@ const PARSE={mov:parseMov,tar:parseTar,plan:parsePlan,fijos:parseFijos};
 const SB_URL="https://yzbtbrpoepwyqzkmptnk.supabase.co";
 const SB_KEY="sb_publishable_63sOadbPt0hg8_ReKNo5Dw_3oqmwz5N";
 const CACHE="finanzas_cache_v1";
-const sb=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+const CODE="finanzas_codigo";
+const sb=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
+let codigo=null;
 const fmtStamp=t=>t.toLocaleString("es-PE",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"});
 function applyParts(parts,stamp){
   Object.keys(PARSE).forEach(k=>{ if(Array.isArray(parts[k])){S[k]=PARSE[k]({values:parts[k]});delete S.err[k]} });
@@ -590,39 +603,77 @@ function showLogin(on){
 }
 function renderDebtSafe(){try{renderDebt()}catch(e){}}
 let loading=false;
+function getStored(){try{return localStorage.getItem(CODE)}catch(e){return null}}
+function forget(){try{localStorage.removeItem(CODE);localStorage.removeItem(CACHE)}catch(e){}}
+async function fetchData(code){
+  const {data,error}=await sb.rpc("finanzas_con_codigo",{codigo:code});
+  if(error)throw error; return data;
+}
+function useRows(rows){
+  const parts={}; let ts=null;
+  (rows||[]).forEach(r=>{parts[r.tab]=r.valores;const t=new Date(r.actualizado);if(!ts||t>ts)ts=t});
+  applyParts(parts,ts);
+  try{if(getStored())localStorage.setItem(CACHE,JSON.stringify({parts,ts:ts&&ts.toISOString()}))}catch(e){}
+}
 async function load(){
-  if(loading)return; loading=true;
+  if(loading||!codigo)return; loading=true;
   $("fresh").textContent=S.stamp?"Actualizando… · datos al "+fmtStamp(S.stamp):"Cargando…";
   try{
-    const {data,error}=await sb.from("hojas").select("tab,valores,actualizado");
-    if(error)throw error;
-    if(!data||!data.length){notice("Esta cuenta no tiene acceso a los datos.","Entra con ramirezcacereseduardo18@gmail.com.",true);$("fresh").textContent="";return}
-    const parts={}; let ts=null;
-    data.forEach(r=>{parts[r.tab]=r.valores;const t=new Date(r.actualizado);if(!ts||t>ts)ts=t});
-    applyParts(parts,ts);
-    try{localStorage.setItem(CACHE,JSON.stringify({parts,ts:ts&&ts.toISOString()}))}catch(e){}
+    const d=await fetchData(codigo);
+    if(d&&d.hojas){useRows(d.hojas)}
+    else{codigo=null;forget();showLogin(true);msg(d&&d.error==="bloqueado"?"Demasiados intentos. Espera 15 minutos.":"El código cambió. Ingrésalo de nuevo.",true)}
   }catch(e){
     if(!S.mov)notice("No pude cargar tus datos.","Revisa tu conexión y toca Actualizar.",true);
     $("fresh").textContent=S.stamp?"Sin conexión · datos al "+fmtStamp(S.stamp):"Sin conexión";
   }finally{loading=false}
 }
-$("refresh").addEventListener("click",load);
-$("logout").addEventListener("click",async()=>{await sb.auth.signOut();try{localStorage.removeItem(CACHE)}catch(e){}location.reload()});
-$("login").addEventListener("submit",async e=>{
-  e.preventDefault();
-  const email=$("email").value.trim(); if(!email)return;
-  $("sendLink").disabled=true; $("loginMsg").textContent="Enviando…";
-  const {error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname}});
-  $("sendLink").disabled=false;
-  $("loginMsg").className="fnote "+(error?"bad":"ok");$("loginMsg").textContent=error?"No se pudo enviar: "+error.message:"Listo. Revisa tu correo y abre el enlace en este dispositivo.";
+function msg(t,bad){$("loginMsg").className="fnote "+(bad?"bad":"ok");$("loginMsg").textContent=t}
+const pins=[...document.querySelectorAll("#pin input")];
+function pinValue(){return pins.map(i=>i.value).join("")}
+function clearPin(){pins.forEach(i=>i.value="");pins[0].focus()}
+pins.forEach((inp,i)=>{
+  inp.addEventListener("input",()=>{
+    const v=inp.value.replace(/\D/g,"");
+    if(v.length>1){[...v].slice(0,6-i).forEach((c,k)=>pins[i+k].value=c)}else inp.value=v;
+    const next=pins.find(x=>!x.value); if(next)next.focus(); else pins[5].focus();
+    if(pinValue().length===6)$("login").requestSubmit();
+  });
+  inp.addEventListener("keydown",e=>{
+    if(e.key==="Backspace"&&!inp.value&&i>0){pins[i-1].value="";pins[i-1].focus();e.preventDefault()}
+    if(e.key==="ArrowLeft"&&i>0)pins[i-1].focus();
+    if(e.key==="ArrowRight"&&i<5)pins[i+1].focus();
+  });
+  inp.addEventListener("paste",e=>{const t=(e.clipboardData.getData("text")||"").replace(/\D/g,"").slice(0,6);if(t){e.preventDefault();[...t].forEach((c,k)=>{if(pins[k])pins[k].value=c});if(t.length===6)$("login").requestSubmit();else pins[t.length].focus()}});
+  inp.addEventListener("focus",()=>inp.select());
 });
-(async()=>{
-  const {data:{session}}=await sb.auth.getSession();
-  if(session){
-    try{const c=JSON.parse(localStorage.getItem(CACHE)||"null");if(c&&c.parts)applyParts(c.parts,c.ts?new Date(c.ts):null)}catch(e){}
+let entering=false;
+$("login").addEventListener("submit",async e=>{
+  e.preventDefault(); if(entering)return;
+  const code=pinValue(); if(code.length<6){msg("Escribe los 6 dígitos.",true);return}
+  entering=true; $("enter").disabled=true; msg("Verificando…");
+  try{
+    const d=await fetchData(code);
+    if(d&&d.hojas){
+      codigo=code;
+      try{if($("remember").checked)localStorage.setItem(CODE,code);else forget()}catch(e){}
+      msg(""); showLogin(false); useRows(d.hojas);
+    }else{
+      $("pin").classList.remove("shake");void $("pin").offsetWidth;$("pin").classList.add("shake");
+      msg(d&&d.error==="bloqueado"?"Demasiados intentos fallidos. Espera 15 minutos e inténtalo de nuevo.":"Código incorrecto."+(d&&d.quedan!=null?` Te quedan ${d.quedan} intentos.`:""),true);
+      clearPin();
+    }
+  }catch(err){msg("No pude conectar. Revisa tu internet e inténtalo otra vez.",true)}
+  finally{entering=false;$("enter").disabled=false}
+});
+$("refresh").addEventListener("click",load);
+$("logout").addEventListener("click",()=>{forget();location.reload()});
+(()=>{
+  const c=getStored();
+  if(c){
+    codigo=c;
+    try{const k=JSON.parse(localStorage.getItem(CACHE)||"null");if(k&&k.parts)applyParts(k.parts,k.ts?new Date(k.ts):null)}catch(e){}
     showLogin(false);load();
-  }else{showLogin(true)}
-  sb.auth.onAuthStateChange((ev,s)=>{ if(ev==="SIGNED_IN"&&s){showLogin(false);load()} if(ev==="SIGNED_OUT")showLogin(true) });
+  }else{showLogin(true);pins[0].focus()}
 })();
 </script>
 
