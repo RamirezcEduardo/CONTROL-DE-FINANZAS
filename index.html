@@ -162,7 +162,21 @@ td.date{font-family:var(--f-num);font-size:13px;color:var(--muted);white-space:n
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--surface);padding:10px 16px;font-size:15px;font-weight:600}
 .btn:disabled{opacity:.6}
 </style>
-<style>body{margin:0}</style>
+<style>
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;font-size:15px}
+img{max-width:100%}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+.login-wrap{display:grid;place-items:center;min-height:60vh;padding-block:24px}
+.login{width:min(420px,100%);gap:14px;padding:28px 24px;box-shadow:0 10px 30px rgba(0,0,0,.06)}
+.login .brand{display:flex;align-items:center;gap:10px;color:var(--accent);font-weight:600;font-size:13px;letter-spacing:.06em;text-transform:uppercase}
+.login .brand svg{flex:0 0 auto}
+.login h2{font-size:24px}
+.login .btn.primary{width:100%;border-radius:10px}
+.login .ok{color:var(--ingreso)} .login .bad{color:var(--gasto)}
+body.out header .sub{display:none}
+</style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 </head>
 <body>
@@ -186,14 +200,17 @@ td.date{font-family:var(--f-num);font-size:13px;color:var(--muted);white-space:n
   </div>
 
 
-  <form class="login" id="login" hidden>
+  <div class="login-wrap" id="loginWrap" hidden>
+  <form class="login" id="login">
+    <div class="brand"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="3" stroke="currentColor" stroke-width="2"/><path d="M2 10h20" stroke="currentColor" stroke-width="2"/><path d="M6 15h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Acceso privado</div>
     <h2>Entra a tu tablero</h2>
-    <p>Te enviamos un enlace a tu correo. Ábrelo en este mismo teléfono o computadora y entrarás directo. Solo necesitas hacerlo una vez por dispositivo.</p>
+    <p>Te enviaremos un enlace a tu correo. Ábrelo en este mismo dispositivo y entrarás directo. Solo lo haces una vez por dispositivo.</p>
     <label for="email">Correo</label>
-    <input id="email" type="email" autocomplete="email" required value="ramirezcacereseduardo18@gmail.com">
+    <input id="email" type="email" autocomplete="email" inputmode="email" required value="ramirezcacereseduardo18@gmail.com">
     <button class="btn primary" id="sendLink" type="submit">Enviarme el enlace</button>
     <p class="fnote" id="loginMsg" role="status"></p>
   </form>
+  </div>
   <div class="debt" id="debt" hidden></div>
 
   <nav class="tabs" aria-label="Secciones">
@@ -288,7 +305,7 @@ td.date{font-family:var(--f-num);font-size:13px;color:var(--muted);white-space:n
     </div>
   </section>
 
-  <p class="foot">Los pagos de tu tarjeta BCP no cuentan como gasto, porque cada consumo ya se contó el día que lo hiciste. Los pagos a iO y CMR sí cuentan, porque sus consumos no llegan por correo. Para corregir una categoría, edítala en la hoja y pulsa Actualizar.</p>
+  <p class="foot" id="footNote">Los pagos de tu tarjeta BCP no cuentan como gasto, porque cada consumo ya se contó el día que lo hiciste. Los pagos a iO y CMR sí cuentan, porque sus consumos no llegan por correo. Para corregir una categoría, edítala en la hoja y pulsa Actualizar.</p>
 </div>
 
 <script>
@@ -564,12 +581,14 @@ function applyParts(parts,stamp){
 }
 function notice(title,body,err){$("status").hidden=false;$("status").className="notice"+(err?" err":"");$("status").innerHTML=`<p><strong>${esc(title)}</strong></p>${body?`<p>${esc(body)}</p>`:""}`}
 function showLogin(on){
-  $("login").hidden=!on;
-  ["debt","filters","v-resumen","v-movimientos","v-tarjetas","v-plan"].forEach(id=>{ if(on)$(id).hidden=true });
+  document.body.classList.toggle("out",on);
+  $("loginWrap").hidden=!on;
+  ["debt","filters","v-resumen","v-movimientos","v-tarjetas","v-plan","footNote","status"].forEach(id=>{ if(on)$(id).hidden=true });
   document.querySelector("nav.tabs").hidden=on;
-  $("logout").hidden=on; $("refresh").hidden=on;
-  if(on){$("status").hidden=true;$("fresh").textContent=""}else showView(location.hash.slice(1));
+  $("logout").hidden=on; $("refresh").hidden=on; $("footNote").hidden=on;
+  if(on){$("fresh").textContent=""}else{renderDebtSafe();showView(location.hash.slice(1))}
 }
+function renderDebtSafe(){try{renderDebt()}catch(e){}}
 let loading=false;
 async function load(){
   if(loading)return; loading=true;
@@ -595,12 +614,14 @@ $("login").addEventListener("submit",async e=>{
   $("sendLink").disabled=true; $("loginMsg").textContent="Enviando…";
   const {error}=await sb.auth.signInWithOtp({email,options:{emailRedirectTo:location.origin+location.pathname}});
   $("sendLink").disabled=false;
-  $("loginMsg").textContent=error?"No se pudo enviar: "+error.message:"Listo. Revisa tu correo y abre el enlace en este dispositivo.";
+  $("loginMsg").className="fnote "+(error?"bad":"ok");$("loginMsg").textContent=error?"No se pudo enviar: "+error.message:"Listo. Revisa tu correo y abre el enlace en este dispositivo.";
 });
 (async()=>{
-  try{const c=JSON.parse(localStorage.getItem(CACHE)||"null");if(c&&c.parts)applyParts(c.parts,c.ts?new Date(c.ts):null)}catch(e){}
   const {data:{session}}=await sb.auth.getSession();
-  if(session){showLogin(false);load()}else{showLogin(true)}
+  if(session){
+    try{const c=JSON.parse(localStorage.getItem(CACHE)||"null");if(c&&c.parts)applyParts(c.parts,c.ts?new Date(c.ts):null)}catch(e){}
+    showLogin(false);load();
+  }else{showLogin(true)}
   sb.auth.onAuthStateChange((ev,s)=>{ if(ev==="SIGNED_IN"&&s){showLogin(false);load()} if(ev==="SIGNED_OUT")showLogin(true) });
 })();
 </script>
