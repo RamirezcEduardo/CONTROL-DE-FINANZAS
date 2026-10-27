@@ -618,13 +618,19 @@ function useRows(rows){
 async function load(){
   if(loading||!codigo)return; loading=true;
   $("fresh").textContent=S.stamp?"Actualizando… · datos al "+fmtStamp(S.stamp):"Cargando…";
+  let d;
+  try{d=await fetchData(codigo)}
+  catch(e){
+    if(!S.mov)notice("No pude cargar tus datos.","Revisa tu conexión y toca Actualizar.",true);
+    $("fresh").textContent=S.stamp?"Sin conexión · datos al "+fmtStamp(S.stamp):"Sin conexión";
+    loading=false;return;
+  }
   try{
-    const d=await fetchData(codigo);
     if(d&&d.hojas){useRows(d.hojas)}
     else{codigo=null;forget();showLogin(true);msg(d&&d.error==="bloqueado"?"Demasiados intentos. Espera 15 minutos.":"El código cambió. Ingrésalo de nuevo.",true)}
   }catch(e){
-    if(!S.mov)notice("No pude cargar tus datos.","Revisa tu conexión y toca Actualizar.",true);
-    $("fresh").textContent=S.stamp?"Sin conexión · datos al "+fmtStamp(S.stamp):"Sin conexión";
+    console.error(e);
+    $("fresh").textContent="Error al mostrar los datos"+(S.stamp?" · datos al "+fmtStamp(S.stamp):"");
   }finally{loading=false}
 }
 function msg(t,bad){$("loginMsg").className="fnote "+(bad?"bad":"ok");$("loginMsg").textContent=t}
